@@ -1,196 +1,205 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-export default function SiteReport() {
-  const [project, setProject] = useState(localStorage.getItem('project') || '');
-  const [place, setPlace] = useState(localStorage.getItem('place') || '');
-  const [date, setDate] = useState(localStorage.getItem('date') || '');
-  const [description, setDescription] = useState(localStorage.getItem('description') || '');
-  const [images, setImages] = useState<{ file: File; preview: string; id: string }[]>([]);
+// Deep Engineering Database - You can keep adding more here
+const IS_CODE_DATA = [
+  // IS 456:2000 (Plain and Reinforced Concrete)
+  { code: "IS 456", clause: "26.5.1.1", topic: "Tension Steel (Beam)", detail: "Min: 0.85*bd/fy | Max: 0.04*bD" },
+  { code: "IS 456", clause: "26.5.1.2", topic: "Compression Steel (Beam)", detail: "Maximum area shall not exceed 0.04*bD" },
+  { code: "IS 456", clause: "26.5.2.1", topic: "Minimum Reinforcement (Slab)", detail: "0.15% for Mild Steel, 0.12% for HYSD/Fe500" },
+  { code: "IS 456", clause: "26.5.3.1", topic: "Longitudinal Steel (Column)", detail: "Min: 0.8% | Max: 4% (to avoid congestion) or 6%" },
+  { code: "IS 456", clause: "Table 16", topic: "Nominal Cover (Durability)", detail: "Mild: 20mm, Moderate: 30mm, Severe: 45mm, Very Severe: 50mm" },
+  { code: "IS 456", clause: "Table 21", topic: "Permissible Shear Stress", detail: "Based on concrete grade and % of tension reinforcement" },
+  { code: "IS 456", clause: "23.2.1", topic: "Deflection (Span/Depth)", detail: "Cantilever: 7, Simply Supported: 20, Continuous: 26" },
+  
+  // IS 800:2007 (General Construction in Steel)
+  { code: "IS 800", clause: "Table 5", topic: "Partial Safety Factors", detail: "Resistance governed by yielding: 1.10, Buckling: 1.10" },
+  { code: "IS 800", clause: "3.8", topic: "Slenderness Ratio (Max)", detail: "Tension members: 400, Compression (Dead/Live): 180" },
+
+  // IS 875 (Loads)
+  { code: "IS 875-P3", clause: "6.3", topic: "Design Wind Speed (Vz)", detail: "Vz = Vb * k1 * k2 * k3 * k4 (where Vb is basic wind speed)" },
+  { code: "IS 875-P2", clause: "Table 1", topic: "Imposed Loads (Residential)", detail: "Rooms/Kitchen: 2.0 kN/m², Corridors/Stairs: 3.0 kN/m²" }
+];
+
+export default function CodeBook() {
+  const [project, setProject] = useState(localStorage.getItem('cb_project') || '');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedList, setSelectedList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Sync basic info to localStorage
+  // Auto-save Project Name
   useEffect(() => {
-    localStorage.setItem('project', project);
-    localStorage.setItem('place', place);
-    localStorage.setItem('date', date);
-    localStorage.setItem('description', description);
-  }, [project, place, date, description]);
+    localStorage.setItem('cb_project', project);
+  }, [project]);
 
-  // Handle Image Selection
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const filesArray = Array.from(e.target.files);
-      const newImages = filesArray.map(file => ({
-        file: file,
-        preview: URL.createObjectURL(file),
-        id: Math.random().toString(36).substr(2, 9) // Unique ID for faster list updates
-      }));
-      setImages(prev => [...prev, ...newImages]);
+  const addClause = (item: any) => {
+    if (!selectedList.find(c => c.clause === item.clause)) {
+      setSelectedList([...selectedList, item]);
+      setSearchTerm(''); // Clear search after adding
     }
   };
 
-  // Remove Image with Memory Cleanup
-  const removeImage = useCallback((id: string, preview: string) => {
-    URL.revokeObjectURL(preview); // Frees up browser memory immediately
-    setImages(prev => prev.filter(img => img.id !== id));
-  }, []);
-
-  const clearForm = () => {
-    if (window.confirm("Clear all data?")) {
-      images.forEach(img => URL.revokeObjectURL(img.preview));
-      setProject('');
-      setPlace('');
-      setDate('');
-      setDescription('');
-      setImages([]);
-      localStorage.clear();
-    }
+  const removeClause = (clauseNo: string) => {
+    setSelectedList(selectedList.filter(c => c.clause !== clauseNo));
   };
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  };
+  // Filter logic for search
+  const filteredSuggestions = searchTerm.length > 1 
+    ? IS_CODE_DATA.filter(i => 
+        i.topic.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        i.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        i.clause.includes(searchTerm)
+      ) 
+    : [];
 
-  const generatePDFBlob = async () => {
+  const generateReport = async () => {
+    if (!project || selectedList.length === 0) return alert("Please enter Project Name and select at least one Clause!");
+    setLoading(true);
+    
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
-    
-    // FORMAT DATE: From 2026-04-13 to 13-04-2026
-    const formattedDate = date ? date.split('-').reverse().join('-') : '';
 
-    doc.setFillColor(146, 208, 80); 
-    doc.rect(0, 0, pageWidth, 25, 'F');
-    doc.setFontSize(20);
+    // HEADER - DARK THEME PROFESSIONAL
+    doc.setFillColor(33, 47, 61); 
+    doc.rect(0, 0, pageWidth, 30, 'F');
+    doc.setFontSize(18);
     doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.text("SITE PROGRESS REPORT", pageWidth / 2, 17, { align: 'center' });
+    doc.text("DESIGN COMPLIANCE SUMMARY", pageWidth / 2, 15, { align: 'center' });
+    doc.setFontSize(10);
+    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, pageWidth / 2, 22, { align: 'center' });
 
+    // PROJECT DETAILS
     autoTable(doc, {
-      startY: 30,
-      head: [['Field', 'Details']],
+      startY: 35,
       body: [
-        ['Project Name', project.toUpperCase()],
-        ['Location', place.toUpperCase()],
-        ['Work Date', formattedDate], // Use the reverse formatted date here
-        ['Description', description],
+        ['PROJECT NAME', project.toUpperCase()],
+        ['CONSULTANT', 'UNIQ DESIGNS'],
+        ['REFERENCE', 'IS CODE BOOK AUTOMATION']
       ],
-      theme: 'grid',
-      headStyles: { fillColor: [0, 112, 192], fontSize: 12 },
-      styles: { cellPadding: 5, fontSize: 11 }
+      theme: 'plain',
+      styles: { fontStyle: 'bold', fontSize: 11, textColor: [44, 62, 80] }
     });
 
-    let currentY = (doc as any).lastAutoTable.finalY + 15;
+    // DATA TABLE
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable.finalY + 10,
+      head: [['IS CODE', 'CLAUSE', 'TOPIC / CATEGORY', 'MANDATORY PROVISION']],
+      body: selectedList.map(c => [c.code, c.clause, c.topic, c.detail]),
+      theme: 'grid',
+      headStyles: { fillColor: [44, 62, 80], halign: 'center' },
+      styles: { fontSize: 9, cellPadding: 4 },
+      columnStyles: { 3: { cellWidth: 70 } }
+    });
 
-    for (let i = 0; i < images.length; i++) {
-      const base64 = await fileToBase64(images[i].file);
-      if (currentY > 220) {
-        doc.addPage();
-        currentY = 20;
-      }
-
-      doc.setFontSize(12);
-      doc.setTextColor(0, 0, 0);
-      doc.text(`Progress Photo ${i + 1}:`, 15, currentY);
-      
-      const imgProps = doc.getImageProperties(base64);
-      const imgWidth = 170; 
-      const imgHeight = (imgProps.height * imgWidth) / imgProps.width;
-
-      doc.addImage(base64, 'JPEG', 20, currentY + 5, imgWidth, imgHeight);
-      currentY += imgHeight + 25;
-    }
-
+    // FOOTER
     const totalPages = doc.getNumberOfPages();
-    for (let j = 1; j <= totalPages; j++) {
-      doc.setPage(j);
-      doc.setFontSize(10);
-      doc.setTextColor(150);
-      doc.text(`Page ${j} of ${totalPages}`, pageWidth / 2, 285, { align: 'center' });
+    for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text("Generated by CodeBook AI Assistant", 15, 285);
+        doc.text(`Page ${i} of ${totalPages}`, pageWidth - 25, 285);
     }
 
-    return doc.output('blob');
-  };
-
-  const handleAction = async (type: 'download' | 'share') => {
-    if (!project || images.length === 0) return alert("Add details and photos!");
-    setLoading(true);
-    try {
-      const blob = await generatePDFBlob();
-      const file = new File([blob], `${project.replace(/\s+/g, '_')}_Report.pdf`, { type: 'application/pdf' });
-
-      if (type === 'download') {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = file.name;
-        link.click();
-      } else {
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: 'Site Report' });
-        } else {
-          alert("Sharing not supported. Please download instead.");
-        }
-      }
-    } catch (err) {
-      alert("Error generating report.");
-    }
+    doc.save(`${project.replace(/\s+/g, '_')}_IS_Compliance.pdf`);
     setLoading(false);
   };
 
   return (
     <div style={containerStyle}>
-      <header style={headerStyle}>SITE REPORT BUILDER</header>
+      <header style={headerStyle}>
+        <div style={{fontSize: '24px'}}>📘</div>
+        CODEBOOK AI
+      </header>
       
-      <div style={formCardStyle}>
-        <div style={inputGroup}><label style={labelStyle}>Project Name</label><input value={project} style={inputStyle} onChange={(e) => setProject(e.target.value)} /></div>
-        <div style={inputGroup}><label style={labelStyle}>Location</label><input value={place} style={inputStyle} onChange={(e) => setPlace(e.target.value)} /></div>
-        <div style={inputGroup}><label style={labelStyle}>Date of Work</label><input type="date" value={date} style={inputStyle} onChange={(e) => setDate(e.target.value)} /></div>
-        <div style={inputGroup}><label style={labelStyle}>Progress Notes</label><textarea value={description} style={textareaStyle} onChange={(e) => setDescription(e.target.value)} /></div>
-        
-        <label style={uploadBoxStyle}>📷 ADD SITE PHOTOS<input type="file" multiple accept="image/*" onChange={handleImageChange} style={{ display: 'none' }} /></label>
+      <div style={formCard}>
+        {/* Project Input */}
+        <div style={inputGroup}>
+          <label style={labelStyle}>PROJECT NAME</label>
+          <input 
+            value={project} 
+            onChange={(e) => setProject(e.target.value)} 
+            style={inputStyle} 
+            placeholder="E.g. G+2 Residential Building" 
+          />
+        </div>
 
-        {images.length > 0 && (
-          <div style={previewGrid}>
-            {images.map((img) => (
-              <div key={img.id} style={thumbWrapper}>
-                <img src={img.preview} style={thumbnailStyle} alt="preview" />
-                <button onClick={() => removeImage(img.id, img.preview)} style={removeBtn}>×</button>
+        {/* Search Engine */}
+        <div style={inputGroup}>
+          <label style={labelStyle}>SEARCH IS CODE PROVISIONS</label>
+          <input 
+            value={searchTerm} 
+            onChange={(e) => setSearchTerm(e.target.value)} 
+            style={inputStyle} 
+            placeholder="Type 'Steel', 'Beam', 'IS 456'..." 
+          />
+          
+          {/* Suggestions Dropdown */}
+          {filteredSuggestions.length > 0 && (
+            <div style={suggestionBox}>
+              {filteredSuggestions.map((item, idx) => (
+                <div key={idx} onClick={() => addClause(item)} style={suggestionItem}>
+                  <div style={{fontWeight: 'bold'}}>{item.code}: {item.clause}</div>
+                  <div style={{fontSize: '12px', color: '#666'}}>{item.topic}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Selected List Section */}
+        <div style={{marginTop: '10px'}}>
+          <p style={labelStyle}>SELECTED FOR REPORT ({selectedList.length})</p>
+          {selectedList.length === 0 && <p style={{color: '#999', fontSize: '13px'}}>No clauses added yet.</p>}
+          <div style={selectedContainer}>
+            {selectedList.map((item, index) => (
+              <div key={index} style={clauseBadge}>
+                <div style={{flex: 1}}>
+                  <span style={{fontWeight: 'bold', color: '#2980b9'}}>{item.code}:{item.clause}</span>
+                  <br/>
+                  <span style={{fontSize: '12px'}}>{item.topic}</span>
+                </div>
+                <button onClick={() => removeClause(item.clause)} style={removeBtn}>×</button>
               </div>
             ))}
           </div>
-        )}
+        </div>
 
+        {/* Actions */}
         <div style={actionArea}>
-          <button onClick={() => handleAction('download')} disabled={loading} style={btnDownload}>{loading ? "PROCESSING..." : "DOWNLOAD PDF"}</button>
-          <button onClick={() => handleAction('share')} disabled={loading} style={btnShare}>{loading ? "PREPARING..." : "SHARE TO WHATSAPP"}</button>
-          <button onClick={clearForm} style={btnClear}>RESET / CLEAR ALL</button>
+          <button 
+            onClick={generateReport} 
+            disabled={loading} 
+            style={{...btnPrimary, backgroundColor: loading ? '#95a5a6' : '#2980b9'}}
+          >
+            {loading ? "GENERATING..." : "GENERATE COMPLIANCE PDF"}
+          </button>
+          
+          <button 
+            onClick={() => {setSelectedList([]); setProject(''); localStorage.clear();}} 
+            style={btnClear}
+          >
+            RESET ALL
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-// Styles
-const containerStyle = { maxWidth: '480px', margin: '0 auto', minHeight: '100vh', backgroundColor: '#f0f2f5', fontFamily: 'sans-serif' };
-const headerStyle = { backgroundColor: '#92d050', padding: '20px', textAlign: 'center' as 'center', fontWeight: 'bold', fontSize: '20px', color: '#fff' };
-const formCardStyle = { padding: '20px', display: 'flex', flexDirection: 'column' as 'column', gap: '15px' };
-const inputGroup = { display: 'flex', flexDirection: 'column' as 'column', gap: '5px' };
-const labelStyle = { fontSize: '13px', fontWeight: '600', color: '#444' };
-const inputStyle = { padding: '12px', borderRadius: '8px', border: '1px solid #ced4da' };
-const textareaStyle = { padding: '12px', borderRadius: '8px', border: '1px solid #ced4da', height: '80px', resize: 'none' as 'none' };
-const uploadBoxStyle = { padding: '20px', backgroundColor: '#fff', color: '#0070c0', textAlign: 'center' as 'center', borderRadius: '10px', border: '2px dashed #0070c0', cursor: 'pointer', fontWeight: 'bold' };
-const previewGrid = { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginTop: '10px' };
-const thumbWrapper = { position: 'relative' as 'relative' };
-const thumbnailStyle = { width: '100%', height: '60px', objectFit: 'cover' as 'cover', borderRadius: '6px', border: '1px solid #ddd' };
-const removeBtn = { position: 'absolute' as 'absolute', top: '-5px', right: '-5px', background: 'red', color: 'white', border: 'none', borderRadius: '50%', width: '22px', height: '22px', cursor: 'pointer', fontWeight: 'bold' };
-const actionArea = { marginTop: '10px', display: 'flex', flexDirection: 'column' as 'column', gap: '12px' };
-const btnDownload = { padding: '16px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', fontSize: '16px' };
-const btnShare = { padding: '16px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', fontSize: '16px' };
-const btnClear = { background: 'none', border: 'none', color: '#6c757d', textDecoration: 'underline', cursor: 'pointer', fontSize: '14px' };
+// STYLING OBJECTS
+const containerStyle: React.CSSProperties = { maxWidth: '450px', margin: '0 auto', minHeight: '100vh', backgroundColor: '#f4f7f6', fontFamily: '"Segoe UI", Roboto, Helvetica, Arial, sans-serif' };
+const headerStyle: React.CSSProperties = { backgroundColor: '#212f3d', color: '#fff', padding: '25px', textAlign: 'center', fontWeight: 'bold', fontSize: '22px', letterSpacing: '1px' };
+const formCard: React.CSSProperties = { padding: '20px', display: 'flex', flexDirection: 'column', gap: '18px' };
+const inputGroup: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '6px', position: 'relative' };
+const labelStyle: React.CSSProperties = { fontSize: '12px', fontWeight: 'bold', color: '#566573' };
+const inputStyle: React.CSSProperties = { padding: '14px', borderRadius: '10px', border: '1px solid #d5dbdb', fontSize: '15px', outline: 'none', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.05)' };
+const suggestionBox: React.CSSProperties = { position: 'absolute', top: '65px', width: '100%', backgroundColor: '#fff', borderRadius: '10px', boxShadow: '0 4px 15px rgba(0,0,0,0.15)', zIndex: 10, maxHeight: '200px', overflowY: 'auto' };
+const suggestionItem: React.CSSProperties = { padding: '12px', borderBottom: '1px solid #f2f3f4', cursor: 'pointer' };
+const selectedContainer: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '5px' };
+const clauseBadge: React.CSSProperties = { display: 'flex', alignItems: 'center', backgroundColor: '#fff', padding: '12px', borderRadius: '10px', borderLeft: '5px solid #2980b9', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' };
+const removeBtn: React.CSSProperties = { background: '#fdedec', color: '#e74c3c', border: 'none', borderRadius: '50%', width: '25px', height: '25px', cursor: 'pointer', fontWeight: 'bold' };
+const actionArea: React.CSSProperties = { marginTop: '15px', display: 'flex', flexDirection: 'column', gap: '12px' };
+const btnPrimary: React.CSSProperties = { padding: '16px', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', transition: '0.3s' };
+const btnClear: React.CSSProperties = { background: 'none', border: 'none', color: '#95a5a6', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px' };
