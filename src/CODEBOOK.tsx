@@ -1,195 +1,219 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// --- ENHANCED ENGINEERING DATABASE ---
-const IS_CODE_DATA = [
-  { id: 1, code: "IS 456", clause: "26.5.1.1", topic: "Tension Steel (Beam)", detail: "Min: 0.85*bd/fy | Max: 0.04*bD", type: "calc_tension" },
-  { id: 2, code: "IS 456", clause: "26.5.1.2", topic: "Compression Steel (Beam)", detail: "Max area: 0.04*bD", type: "calc_comp" },
-  { id: 3, code: "IS 456", clause: "26.5.2.1", topic: "Min Reinforcement (Slab)", detail: "0.12% for HYSD, 0.15% for Mild", type: "calc_slab" },
-  { id: 4, code: "IS 456", clause: "Table 16", topic: "Nominal Cover", detail: "Mild: 20mm, Mod: 30mm, Sev: 45mm", type: "info" },
-  { id: 5, code: "IS 456", clause: "23.2.1", topic: "Deflection (Span/Depth)", detail: "SS: 20, Cant: 7, Cont: 26", type: "info" },
-  { id: 6, code: "IS 800", clause: "Table 5", topic: "Safety Factors", detail: "Yielding: 1.10, Buckling: 1.10", type: "info" },
-  { id: 7, code: "IS 875-P3", clause: "6.3", topic: "Wind Speed (Vz)", detail: "Vz = Vb * k1 * k2 * k3 * k4", type: "info" }
-];
+// --- THEME & STYLES ---
+const COLORS = {
+  bg: '#0f172a',
+  card: '#1e293b',
+  accent: '#3b82f6',
+  success: '#10b981',
+  danger: '#ef4444',
+  text: '#f8fafc',
+  border: '#334155'
+};
 
-export default function UniqCodeBookApp() {
+export default function UniqStructuralEnginePro() {
+  const [tab, setTab] = useState<'AUDIT' | 'REBAR' | 'VASTU'>('AUDIT');
   const [project, setProject] = useState(localStorage.getItem('cb_project') || '');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedList, setSelectedList] = useState<any[]>([]);
+  const [inputs, setInputs] = useState({ b: 230, d: 450, fy: 500, ast_provided: 0 });
+  
+  // Voice & UI States
+  const [isListening, setIsListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Advanced Logic States
-  const [calcInputs, setCalcInputs] = useState({ b: 230, d: 450, fy: 500, D: 500, providedAst: 0 });
-  const [designStatus, setDesignStatus] = useState<{ status: string, msg: string } | null>(null);
+  // Auto-save Project Name
+  useEffect(() => {
+    localStorage.setItem('cb_project', project);
+  }, [project]);
 
-  useEffect(() => { localStorage.setItem('cb_project', project); }, [project]);
+  // --- 1. VOICE LOGIC ---
+  const startListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return alert("Voice recognition not supported in this browser.");
 
-  const filteredSuggestions = useMemo(() => {
-    if (searchTerm.length < 2) return [];
-    return IS_CODE_DATA.filter(i => 
-      i.topic.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      i.clause.includes(searchTerm) ||
-      i.code.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [searchTerm]);
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.lang = 'en-US';
 
-  const addClause = (item: any) => {
-    if (!selectedList.find(c => c.id === item.id)) {
-      setSelectedList([...selectedList, { ...item, verification: "Not Checked" }]);
-      setSearchTerm('');
-    }
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+
+    recognition.onresult = (event: any) => {
+      const command = event.results[0][0].transcript.toLowerCase();
+      setTranscript(command);
+      processVoiceCommand(command);
+    };
+    recognition.start();
   };
 
-  // --- CORE DESIGN VERIFIER LOGIC ---
-  const runVerification = (item: any) => {
-    const { b, d, fy, D, providedAst } = calcInputs;
-    let result = { status: "CHECKED ✅", msg: "Information verified." };
+  const processVoiceCommand = (cmd: string) => {
+    const numbers = cmd.match(/\d+/g);
+    const val = numbers ? parseInt(numbers[0]) : null;
 
-    if (item.type === "calc_tension") {
-      const minAst = (0.85 * b * d) / fy;
-      const maxAst = 0.04 * b * D;
-      if (providedAst < minAst) {
-        result = { status: "FAIL ❌", msg: `Min Steel ${minAst.toFixed(0)}mm² venum. Site-la kammiya irukku.` };
-      } else if (providedAst > maxAst) {
-        result = { status: "FAIL ❌", msg: "Steel Limit thaandiruchu (Max 4%)." };
-      } else {
-        result = { status: "SAFE ✅", msg: "Reinforcement limits-kulla irukku." };
-      }
-    } else if (item.type === "calc_slab") {
-        const minAstSlab = (0.0012 * b * D);
-        result = providedAst >= minAstSlab 
-            ? { status: "SAFE ✅", msg: "Slab reinforcement safe." } 
-            : { status: "FAIL ❌", msg: `Min ${minAstSlab.toFixed(0)}mm² required.` };
-    }
-
-    setDesignStatus(result);
-    // Update the specific item in selected list with the result
-    setSelectedList(prev => prev.map(s => s.id === item.id ? { ...s, verification: result.status, remark: result.msg } : s));
+    if (cmd.includes('width') && val) setInputs(p => ({ ...p, b: val }));
+    else if (cmd.includes('depth') && val) setInputs(p => ({ ...p, d: val }));
+    else if (cmd.includes('steel') && val) setInputs(p => ({ ...p, ast_provided: val }));
+    else if (cmd.includes('generate')) generateReport();
   };
 
+  // --- 2. AUDIT LOGIC ---
+  const runAudit = () => {
+    const minAst = (0.85 * inputs.b * inputs.d) / inputs.fy;
+    const maxAst = 0.04 * inputs.b * inputs.d;
+    
+    if (inputs.ast_provided === 0) return { status: 'WAITING', msg: 'Enter Data or Say "Steel 500"', color: COLORS.card };
+    if (inputs.ast_provided < minAst) return { status: 'FAIL ❌', msg: `Min Steel Need: ${minAst.toFixed(0)}mm²`, color: COLORS.danger };
+    if (inputs.ast_provided > maxAst) return { status: 'FAIL ❌', msg: 'Limit Exceeded (4% bD)', color: COLORS.danger };
+    return { status: 'SAFE ✅', msg: 'Design is IS 456 Compliant', color: COLORS.success };
+  };
+
+  const auditResult = runAudit();
+
+  // --- 3. REBAR CALCULATOR LOGIC ---
+  const calculateRebar = (dia: number, nos: number) => {
+    const area = (Math.PI / 4) * (dia * dia) * nos;
+    setInputs({ ...inputs, ast_provided: Math.round(area) });
+    setTab('AUDIT'); // Switch to see result
+  };
+
+  // --- 4. REPORT GENERATOR ---
   const generateReport = async () => {
-    if (!project || selectedList.length === 0) return alert("Fill project details!");
+    if (!project || inputs.ast_provided === 0) return alert("Enter project name and site data first!");
     setLoading(true);
     const doc = new jsPDF();
-    
-    // Professional Header
-    doc.setFillColor(41, 128, 185);
-    doc.rect(0, 0, 210, 40, 'F');
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    doc.setFillColor(15, 23, 42);
+    doc.rect(0, 0, pageWidth, 40, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(22);
-    doc.text("UNIQ DESIGNS - STRUCTURAL AUDIT", 105, 18, { align: 'center' });
+    doc.text("UNIQ DESIGNS - STRUCTURAL AUDIT", pageWidth / 2, 20, { align: 'center' });
     doc.setFontSize(10);
-    doc.text("Tiruchirappalli, Tamil Nadu | Automated Design Compliance", 105, 28, { align: 'center' });
-    doc.text(`Project: ${project.toUpperCase()} | Date: ${new Date().toLocaleDateString()}`, 105, 35, { align: 'center' });
+    doc.text(`TRICHY, TAMIL NADU | Date: ${new Date().toLocaleDateString()}`, pageWidth / 2, 30, { align: 'center' });
 
-    // Design Audit Table
     autoTable(doc, {
       startY: 45,
-      head: [['CODE', 'CLAUSE', 'TOPIC', 'MANDATORY PROVISION', 'SITE STATUS']],
-      body: selectedList.map(c => [
-        c.code, 
-        c.clause, 
-        c.topic, 
-        c.detail, 
-        c.verification || "Not Checked"
-      ]),
-      headStyles: { fillColor: [44, 62, 80] },
-      columnStyles: { 4: { fontStyle: 'bold' } },
-      styles: { fontSize: 8 }
+      head: [['Field', 'Input Value', 'IS 456 Requirement', 'Status']],
+      body: [
+        ['Project Name', project.toUpperCase(), '-', '-'],
+        ['Section b x d', `${inputs.b} x ${inputs.d} mm`, '-', '-'],
+        ['Provided Ast', `${inputs.ast_provided} mm²`, `Min: ${((0.85*inputs.b*inputs.d)/inputs.fy).toFixed(0)} mm²`, auditResult.status]
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: [59, 130, 246] }
     });
 
-    // Add remarks section if failures exist
-    const finalY = (doc as any).lastAutoTable.finalY + 10;
-    doc.setTextColor(0,0,0);
-    doc.setFontSize(10);
-    doc.text("ENGINEER'S REMARKS & SITE OBSERVATIONS:", 14, finalY);
-    selectedList.forEach((item, index) => {
-        if(item.remark) doc.text(`- ${item.clause}: ${item.remark}`, 14, finalY + 7 + (index * 6));
-    });
-
-    doc.save(`${project}_Structural_Audit.pdf`);
+    doc.save(`${project}_Uniq_Audit.pdf`);
     setLoading(false);
   };
 
   return (
-    <div style={containerStyle}>
-      <header style={headerStyle}>🏗️ UNIQ CODEBOOK AI</header>
-
-      <div style={cardStyle}>
-        <div style={inputGroup}>
-          <label style={labelStyle}>PROJECT NAME</label>
-          <input style={inputStyle} value={project} onChange={e => setProject(e.target.value)} placeholder="e.g., G+1 Building, Trichy" />
+    <div style={appContainer}>
+      {/* HEADER */}
+      <header style={headerStyle}>
+        <div>
+          <div style={{fontSize: '22px', fontWeight: 'bold', letterSpacing: '1px'}}>UNIQ <span style={{color: COLORS.accent}}>ENGINE</span></div>
+          <div style={{fontSize: '10px', opacity: 0.5}}>TRICHY'S AUTOMATION HUB</div>
         </div>
-
-        <div style={inputGroup}>
-          <label style={labelStyle}>SITE SEARCH (IS CODES)</label>
-          <input style={inputStyle} value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search 'Slab', 'Beam', 'IS 456'..." />
-          {filteredSuggestions.length > 0 && (
-            <div style={dropdownStyle}>
-              {filteredSuggestions.map(item => (
-                <div key={item.id} style={itemStyle} onClick={() => addClause(item)}>
-                  <b>{item.code}:{item.clause}</b> - {item.topic}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* INPUTS FOR CALCULATION */}
-        <div style={calcBox}>
-            <h5 style={{margin:'0 0 10px 0', fontSize:'13px'}}>SITE DATA (Verification Inputs)</h5>
-            <div style={gridInputs}>
-                <input type="number" placeholder="b (mm)" style={smallInput} onChange={e => setCalcInputs({...calcInputs, b: +e.target.value})} />
-                <input type="number" placeholder="d (mm)" style={smallInput} onChange={e => setCalcInputs({...calcInputs, d: +e.target.value})} />
-                <input type="number" placeholder="fy (N/mm2)" style={smallInput} onChange={e => setCalcInputs({...calcInputs, fy: +e.target.value})} />
-                <input type="number" placeholder="Provided Ast (mm2)" style={smallInput} onChange={e => setCalcInputs({...calcInputs, providedAst: +e.target.value})} />
-            </div>
-        </div>
-
-        <div style={{marginTop: '15px'}}>
-          <label style={labelStyle}>SELECTED AUDIT LIST</label>
-          {selectedList.map(item => (
-            <div key={item.id} style={itemCard}>
-              <div style={{flex: 1}}>
-                <div style={{fontSize:'14px', fontWeight:'bold'}}>{item.clause}: {item.topic}</div>
-                <div style={{fontSize:'11px', color:'#666'}}>{item.detail}</div>
-                <div style={{marginTop:'5px', fontWeight:'bold', color: item.verification.includes('FAIL') ? 'red' : 'green'}}>
-                    Status: {item.verification}
-                </div>
-              </div>
-              <div style={{display:'flex', flexDirection:'column', gap:'5px'}}>
-                {item.type.startsWith('calc') && (
-                    <button onClick={() => runVerification(item)} style={verifyBtn}>VERIFY</button>
-                )}
-                <button onClick={() => setSelectedList(selectedList.filter(s => s.id !== item.id))} style={removeBtn}>Remove</button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <button onClick={generateReport} disabled={loading} style={mainBtn}>
-          {loading ? "GENERATING..." : "DOWNLOAD AUDIT REPORT"}
+        <button onClick={startListening} style={{...micBtn, backgroundColor: isListening ? COLORS.danger : COLORS.accent}}>
+          {isListening ? '🛑 LISTENING...' : '🎤 VOICE'}
         </button>
-        <p style={{textAlign:'center', fontSize:'11px', color:'#999'}}>Designed for Prakash M | Uniq Designs</p>
+      </header>
+
+      {/* NAVIGATION */}
+      <div style={tabBar}>
+        <button onClick={() => setTab('AUDIT')} style={tab === 'AUDIT' ? activeTab : inactiveTab}>LIVE AUDIT</button>
+        <button onClick={() => setTab('REBAR')} style={tab === 'REBAR' ? activeTab : inactiveTab}>REBAR CALC</button>
+        <button onClick={() => setTab('VASTU')} style={tab === 'VASTU' ? activeTab : inactiveTab}>VASTU</button>
+      </div>
+
+      <div style={{padding: '20px', paddingBottom: '120px'}}>
+        
+        {/* PROJECT IDENTIFIER */}
+        <div style={{marginBottom: '20px'}}>
+           <label style={miniLabel}>PROJECT NAME</label>
+           <input style={projectInput} value={project} onChange={e => setProject(e.target.value)} placeholder="e.g. G+1 Villa Site" />
+        </div>
+
+        {/* --- TAB 1: LIVE AUDIT --- */}
+        {tab === 'AUDIT' && (
+          <div style={fadeAnim}>
+            {transcript && <div style={voiceTranscript}>" {transcript} "</div>}
+            
+            <div style={{...statusCard, backgroundColor: auditResult.color}}>
+               <div style={{fontSize: '12px', opacity: 0.8, letterSpacing: '1px'}}>SITE COMPLIANCE</div>
+               <div style={{fontSize: '32px', fontWeight: '900', margin: '10px 0'}}>{auditResult.status}</div>
+               <div style={{fontSize: '14px', fontWeight: '500'}}>{auditResult.msg}</div>
+            </div>
+
+            <div style={gridInputs}>
+               <div style={inputBox}><label>Width b</label><input type="number" value={inputs.b} onChange={e => setInputs({...inputs, b: +e.target.value})} /></div>
+               <div style={inputBox}><label>Depth d</label><input type="number" value={inputs.d} onChange={e => setInputs({...inputs, d: +e.target.value})} /></div>
+               <div style={{...inputBox, border: `1px solid ${COLORS.accent}`}}><label style={{color: COLORS.accent}}>Site Ast</label><input type="number" value={inputs.ast_provided} onChange={e => setInputs({...inputs, ast_provided: +e.target.value})} /></div>
+               <div style={inputBox}><label>Steel fy</label><input type="number" value={inputs.fy} onChange={e => setInputs({...inputs, fy: +e.target.value})} /></div>
+            </div>
+          </div>
+        )}
+
+        {/* --- TAB 2: REBAR CALCULATOR --- */}
+        {tab === 'REBAR' && (
+          <div style={fadeAnim}>
+            <div style={calcHeader}>Instant Rebar $A_{st}$ Combinations</div>
+            <div style={rebarGrid}>
+               {[12, 16, 20, 25].map(dia => (
+                 <div key={dia} style={rebarCard}>
+                    <div style={{fontSize: '18px', fontWeight: 'bold', color: COLORS.accent}}>{dia} mm</div>
+                    <div style={nosGrid}>
+                       {[2, 3, 4, 6, 8].map(nos => (
+                         <button key={nos} onClick={() => calculateRebar(dia, nos)} style={nosBtn}>{nos}</button>
+                       ))}
+                    </div>
+                 </div>
+               ))}
+            </div>
+          </div>
+        )}
+
+        {/* --- TAB 3: VASTU --- */}
+        {tab === 'VASTU' && (
+          <div style={{textAlign: 'center', marginTop: '50px', opacity: 0.7}}>
+             <div style={{fontSize: '60px'}}>☸️</div>
+             <h3>Vastu-Structural Hybrid</h3>
+             <p>Coming Soon for Uniq Designs Architecture</p>
+          </div>
+        )}
+      </div>
+
+      {/* FOOTER ACTION */}
+      <div style={footerAction}>
+        <button onClick={generateReport} disabled={loading} style={mainBtn}>
+          {loading ? "PROCESSING..." : "GENERATE PROFESSIONAL AUDIT REPORT"}
+        </button>
       </div>
     </div>
   );
 }
 
-// --- STYLING (Optimized for On-Site Use) ---
-const containerStyle: React.CSSProperties = { maxWidth: '480px', margin: '0 auto', backgroundColor: '#fcfcfc', minHeight: '100vh', fontFamily: 'sans-serif' };
-const headerStyle: React.CSSProperties = { backgroundColor: '#2c3e50', color: '#fff', padding: '18px', textAlign: 'center', fontWeight: 'bold', fontSize: '18px' };
-const cardStyle: React.CSSProperties = { padding: '15px', display: 'flex', flexDirection: 'column', gap: '15px' };
-const inputGroup: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '5px', position: 'relative' };
-const labelStyle: React.CSSProperties = { fontSize: '11px', fontWeight: 'bold', color: '#555', letterSpacing: '0.5px' };
-const inputStyle: React.CSSProperties = { padding: '12px', borderRadius: '6px', border: '1px solid #ddd', fontSize: '14px' };
-const dropdownStyle: React.CSSProperties = { position: 'absolute', top: '55px', width: '100%', backgroundColor: 'white', zIndex: 10, border: '1px solid #ddd', borderRadius: '6px', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' };
-const itemStyle: React.CSSProperties = { padding: '10px', borderBottom: '1px solid #eee', fontSize: '13px', cursor: 'pointer' };
-const itemCard: React.CSSProperties = { display: 'flex', backgroundColor: '#fff', padding: '12px', borderRadius: '8px', border: '1px solid #eee', marginBottom: '10px', boxShadow: '0 2px 5px rgba(0,0,0,0.03)' };
-const calcBox: React.CSSProperties = { backgroundColor: '#f0f4f7', padding: '15px', borderRadius: '10px', border: '1px solid #d1d9e0' };
-const gridInputs: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' };
-const smallInput: React.CSSProperties = { padding: '10px', borderRadius: '5px', border: '1px solid #ccc', fontSize: '12px' };
-const verifyBtn: React.CSSProperties = { backgroundColor: '#27ae60', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '5px', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer' };
-const removeBtn: React.CSSProperties = { color: '#e74c3c', fontSize: '11px', background: 'none', border: 'none', cursor: 'pointer' };
-const mainBtn: React.CSSProperties = { backgroundColor: '#2980b9', color: 'white', padding: '16px', border: 'none', borderRadius: '8px', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer' };
+// --- CSS-in-JS STYLES ---
+const appContainer: React.CSSProperties = { maxWidth: '500px', margin: '0 auto', backgroundColor: COLORS.bg, minHeight: '100vh', color: COLORS.text, fontFamily: 'system-ui, sans-serif' };
+const headerStyle: React.CSSProperties = { padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${COLORS.border}` };
+const micBtn: React.CSSProperties = { padding: '10px 18px', border: 'none', borderRadius: '12px', color: 'white', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' };
+const tabBar: React.CSSProperties = { display: 'flex', gap: '5px', background: COLORS.card, margin: '15px', padding: '5px', borderRadius: '15px' };
+const activeTab: React.CSSProperties = { flex: 1, padding: '12px', background: COLORS.accent, border: 'none', borderRadius: '10px', color: 'white', fontWeight: 'bold', fontSize: '12px' };
+const inactiveTab: React.CSSProperties = { flex: 1, padding: '12px', background: 'none', border: 'none', color: '#64748b', fontSize: '12px' };
+const miniLabel: React.CSSProperties = { fontSize: '10px', fontWeight: 'bold', color: COLORS.accent, letterSpacing: '1px' };
+const projectInput: React.CSSProperties = { width: '100%', background: 'none', border: 'none', borderBottom: `2px solid ${COLORS.border}`, color: 'white', padding: '10px 0', fontSize: '18px', outline: 'none' };
+const statusCard: React.CSSProperties = { padding: '30px', borderRadius: '25px', textAlign: 'center', marginBottom: '25px', transition: '0.4s ease' };
+const gridInputs: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' };
+const inputBox: React.CSSProperties = { background: COLORS.card, padding: '15px', borderRadius: '18px', display: 'flex', flexDirection: 'column', gap: '5px' };
+const voiceTranscript: React.CSSProperties = { textAlign: 'center', fontSize: '13px', color: COLORS.accent, marginBottom: '10px', fontStyle: 'italic' };
+const calcHeader: React.CSSProperties = { fontSize: '16px', fontWeight: 'bold', marginBottom: '20px', color: '#94a3b8' };
+const rebarGrid: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '15px' };
+const rebarCard: React.CSSProperties = { background: COLORS.card, padding: '20px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
+const nosGrid: React.CSSProperties = { display: 'flex', gap: '8px' };
+const nosBtn: React.CSSProperties = { width: '35px', height: '35px', borderRadius: '10px', border: 'none', background: '#334155', color: 'white', fontWeight: 'bold', cursor: 'pointer' };
+const footerAction: React.CSSProperties = { position: 'fixed', bottom: '0', width: '100%', maxWidth: '500px', padding: '20px', background: 'linear-gradient(to top, #0f172a 80%, transparent)' };
+const mainBtn: React.CSSProperties = { width: '100%', padding: '20px', background: COLORS.accent, color: 'white', border: 'none', borderRadius: '18px', fontWeight: 'bold', fontSize: '14px', boxShadow: '0 10px 25px rgba(59, 130, 246, 0.4)', cursor: 'pointer' };
+const fadeAnim: React.CSSProperties = { animation: 'fadeIn 0.3s ease' };
