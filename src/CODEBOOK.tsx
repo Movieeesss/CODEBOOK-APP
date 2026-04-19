@@ -1,205 +1,184 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// Deep Engineering Database - You can keep adding more here
+// --- ENHANCED ENGINEERING DATABASE ---
 const IS_CODE_DATA = [
-  // IS 456:2000 (Plain and Reinforced Concrete)
-  { code: "IS 456", clause: "26.5.1.1", topic: "Tension Steel (Beam)", detail: "Min: 0.85*bd/fy | Max: 0.04*bD" },
-  { code: "IS 456", clause: "26.5.1.2", topic: "Compression Steel (Beam)", detail: "Maximum area shall not exceed 0.04*bD" },
-  { code: "IS 456", clause: "26.5.2.1", topic: "Minimum Reinforcement (Slab)", detail: "0.15% for Mild Steel, 0.12% for HYSD/Fe500" },
-  { code: "IS 456", clause: "26.5.3.1", topic: "Longitudinal Steel (Column)", detail: "Min: 0.8% | Max: 4% (to avoid congestion) or 6%" },
-  { code: "IS 456", clause: "Table 16", topic: "Nominal Cover (Durability)", detail: "Mild: 20mm, Moderate: 30mm, Severe: 45mm, Very Severe: 50mm" },
-  { code: "IS 456", clause: "Table 21", topic: "Permissible Shear Stress", detail: "Based on concrete grade and % of tension reinforcement" },
-  { code: "IS 456", clause: "23.2.1", topic: "Deflection (Span/Depth)", detail: "Cantilever: 7, Simply Supported: 20, Continuous: 26" },
+  // IS 456: Concrete
+  { id: 1, code: "IS 456", clause: "26.5.1.1", topic: "Tension Steel (Beam)", detail: "Min: 0.85*bd/fy | Max: 0.04*bD", type: "calc_tension" },
+  { id: 2, code: "IS 456", clause: "26.5.1.2", topic: "Compression Steel (Beam)", detail: "Max area: 0.04*bD", type: "calc_comp" },
+  { id: 3, code: "IS 456", clause: "26.5.2.1", topic: "Min Reinforcement (Slab)", detail: "0.12% for HYSD, 0.15% for Mild", type: "calc_slab" },
+  { id: 4, code: "IS 456", clause: "Table 16", topic: "Nominal Cover", detail: "Mild: 20mm, Mod: 30mm, Sev: 45mm", type: "info" },
+  { id: 5, code: "IS 456", clause: "23.2.1", topic: "Deflection (Span/Depth)", detail: "SS: 20, Cant: 7, Cont: 26", type: "info" },
   
-  // IS 800:2007 (General Construction in Steel)
-  { code: "IS 800", clause: "Table 5", topic: "Partial Safety Factors", detail: "Resistance governed by yielding: 1.10, Buckling: 1.10" },
-  { code: "IS 800", clause: "3.8", topic: "Slenderness Ratio (Max)", detail: "Tension members: 400, Compression (Dead/Live): 180" },
+  // IS 800: Steel
+  { id: 6, code: "IS 800", clause: "Table 5", topic: "Safety Factors", detail: "Yielding: 1.10, Buckling: 1.10", type: "info" },
+  { id: 7, code: "IS 800", clause: "3.8", topic: "Slenderness Ratio", detail: "Tension: 400, Compression: 180", type: "info" },
 
-  // IS 875 (Loads)
-  { code: "IS 875-P3", clause: "6.3", topic: "Design Wind Speed (Vz)", detail: "Vz = Vb * k1 * k2 * k3 * k4 (where Vb is basic wind speed)" },
-  { code: "IS 875-P2", clause: "Table 1", topic: "Imposed Loads (Residential)", detail: "Rooms/Kitchen: 2.0 kN/m², Corridors/Stairs: 3.0 kN/m²" }
+  // IS 875: Loads
+  { id: 8, code: "IS 875-P3", clause: "6.3", topic: "Wind Speed (Vz)", detail: "Vz = Vb * k1 * k2 * k3 * k4", type: "info" },
+  { id: 9, code: "IS 875-P2", clause: "Table 1", topic: "Imposed Load (Residential)", detail: "Rooms: 2.0 kN/m2, Stairs: 3.0 kN/m2", type: "info" }
 ];
 
-export default function CodeBook() {
+export default function AdvancedCodeBook() {
   const [project, setProject] = useState(localStorage.getItem('cb_project') || '');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedList, setSelectedList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Auto-save Project Name
-  useEffect(() => {
-    localStorage.setItem('cb_project', project);
-  }, [project]);
+  // Calculator States
+  const [calcInputs, setCalcInputs] = useState({ b: 230, d: 450, fy: 500, D: 500 });
+  const [calcResult, setCalcResult] = useState<string | null>(null);
+
+  useEffect(() => { localStorage.setItem('cb_project', project); }, [project]);
+
+  const filteredSuggestions = useMemo(() => {
+    if (searchTerm.length < 2) return [];
+    return IS_CODE_DATA.filter(i => 
+      i.topic.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      i.clause.includes(searchTerm) ||
+      i.code.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [searchTerm]);
 
   const addClause = (item: any) => {
-    if (!selectedList.find(c => c.clause === item.clause)) {
+    if (!selectedList.find(c => c.id === item.id)) {
       setSelectedList([...selectedList, item]);
-      setSearchTerm(''); // Clear search after adding
+      setSearchTerm('');
     }
   };
 
-  const removeClause = (clauseNo: string) => {
-    setSelectedList(selectedList.filter(c => c.clause !== clauseNo));
+  // --- AUTOMATED CALCULATION LOGIC ---
+  const runQuickCalc = (type: string) => {
+    const { b, d, fy, D } = calcInputs;
+    let res = "";
+    if (type === "calc_tension") {
+      const minAst = (0.85 * b * d) / fy;
+      res = `Min Ast required: ${minAst.toFixed(2)} mm²`;
+    } else if (type === "calc_slab") {
+      const minAstSlab = (0.0012 * b * D); // For HYSD
+      res = `Min Ast (HYSD): ${minAstSlab.toFixed(2)} mm² per meter`;
+    } else if (type === "calc_comp") {
+      const maxAst = 0.04 * b * D;
+      res = `Max Steel Limit: ${maxAst.toFixed(2)} mm²`;
+    }
+    setCalcResult(res);
   };
-
-  // Filter logic for search
-  const filteredSuggestions = searchTerm.length > 1 
-    ? IS_CODE_DATA.filter(i => 
-        i.topic.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        i.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        i.clause.includes(searchTerm)
-      ) 
-    : [];
 
   const generateReport = async () => {
-    if (!project || selectedList.length === 0) return alert("Please enter Project Name and select at least one Clause!");
+    if (!project || selectedList.length === 0) return alert("Fill project name and select clauses!");
     setLoading(true);
-    
     const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
-
-    // HEADER - DARK THEME PROFESSIONAL
-    doc.setFillColor(33, 47, 61); 
-    doc.rect(0, 0, pageWidth, 30, 'F');
-    doc.setFontSize(18);
+    
+    // Header
+    doc.setFillColor(41, 128, 185);
+    doc.rect(0, 0, 210, 35, 'F');
     doc.setTextColor(255, 255, 255);
-    doc.text("DESIGN COMPLIANCE SUMMARY", pageWidth / 2, 15, { align: 'center' });
+    doc.setFontSize(22);
+    doc.text("DESIGN COMPLIANCE AUDIT", 105, 18, { align: 'center' });
     doc.setFontSize(10);
-    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, pageWidth / 2, 22, { align: 'center' });
+    doc.text(`UNIQ DESIGNS - TRICHY | Date: ${new Date().toLocaleDateString()}`, 105, 28, { align: 'center' });
 
-    // PROJECT DETAILS
+    // Project Table
     autoTable(doc, {
-      startY: 35,
-      body: [
-        ['PROJECT NAME', project.toUpperCase()],
-        ['CONSULTANT', 'UNIQ DESIGNS'],
-        ['REFERENCE', 'IS CODE BOOK AUTOMATION']
-      ],
+      startY: 40,
+      body: [['PROJECT:', project.toUpperCase()], ['CONSULTANT:', 'UNIQ DESIGNS / PRAKASH M']],
       theme: 'plain',
-      styles: { fontStyle: 'bold', fontSize: 11, textColor: [44, 62, 80] }
+      styles: { fontStyle: 'bold', fontSize: 12 }
     });
 
-    // DATA TABLE
+    // Main Clause Table
     autoTable(doc, {
       startY: (doc as any).lastAutoTable.finalY + 10,
-      head: [['IS CODE', 'CLAUSE', 'TOPIC / CATEGORY', 'MANDATORY PROVISION']],
+      head: [['CODE', 'CLAUSE', 'TOPIC', 'MANDATORY PROVISION']],
       body: selectedList.map(c => [c.code, c.clause, c.topic, c.detail]),
-      theme: 'grid',
-      headStyles: { fillColor: [44, 62, 80], halign: 'center' },
-      styles: { fontSize: 9, cellPadding: 4 },
-      columnStyles: { 3: { cellWidth: 70 } }
+      headStyles: { fillColor: [44, 62, 80] },
+      styles: { fontSize: 9 }
     });
 
-    // FOOTER
-    const totalPages = doc.getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
-        doc.setPage(i);
-        doc.setFontSize(8);
-        doc.setTextColor(150);
-        doc.text("Generated by CodeBook AI Assistant", 15, 285);
-        doc.text(`Page ${i} of ${totalPages}`, pageWidth - 25, 285);
-    }
-
-    doc.save(`${project.replace(/\s+/g, '_')}_IS_Compliance.pdf`);
+    doc.save(`${project}_Audit_Report.pdf`);
     setLoading(false);
   };
 
   return (
     <div style={containerStyle}>
       <header style={headerStyle}>
-        <div style={{fontSize: '24px'}}>📘</div>
-        CODEBOOK AI
+        <span>🏗️ UNIQ CODEBOOK AI</span>
       </header>
-      
-      <div style={formCard}>
-        {/* Project Input */}
-        <div style={inputGroup}>
-          <label style={labelStyle}>PROJECT NAME</label>
-          <input 
-            value={project} 
-            onChange={(e) => setProject(e.target.value)} 
-            style={inputStyle} 
-            placeholder="E.g. G+2 Residential Building" 
-          />
-        </div>
 
-        {/* Search Engine */}
-        <div style={inputGroup}>
-          <label style={labelStyle}>SEARCH IS CODE PROVISIONS</label>
+      <div style={cardStyle}>
+        <label style={labelStyle}>PROJECT NAME</label>
+        <input style={inputStyle} value={project} onChange={e => setProject(e.target.value)} placeholder="e.g., G+1 Villa, Trichy" />
+
+        <label style={labelStyle}>SEARCH IS CODE PROVISIONS (Site Search)</label>
+        <div style={{position: 'relative'}}>
           <input 
-            value={searchTerm} 
-            onChange={(e) => setSearchTerm(e.target.value)} 
             style={inputStyle} 
-            placeholder="Type 'Steel', 'Beam', 'IS 456'..." 
+            value={searchTerm} 
+            onChange={e => setSearchTerm(e.target.value)} 
+            placeholder="Search 'Steel', 'Cover', 'Wind'..." 
           />
-          
-          {/* Suggestions Dropdown */}
           {filteredSuggestions.length > 0 && (
-            <div style={suggestionBox}>
-              {filteredSuggestions.map((item, idx) => (
-                <div key={idx} onClick={() => addClause(item)} style={suggestionItem}>
-                  <div style={{fontWeight: 'bold'}}>{item.code}: {item.clause}</div>
-                  <div style={{fontSize: '12px', color: '#666'}}>{item.topic}</div>
+            <div style={dropdownStyle}>
+              {filteredSuggestions.map(item => (
+                <div key={item.id} style={itemStyle} onClick={() => addClause(item)}>
+                  <b>{item.code}:{item.clause}</b> - {item.topic}
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Selected List Section */}
-        <div style={{marginTop: '10px'}}>
-          <p style={labelStyle}>SELECTED FOR REPORT ({selectedList.length})</p>
-          {selectedList.length === 0 && <p style={{color: '#999', fontSize: '13px'}}>No clauses added yet.</p>}
-          <div style={selectedContainer}>
-            {selectedList.map((item, index) => (
-              <div key={index} style={clauseBadge}>
-                <div style={{flex: 1}}>
-                  <span style={{fontWeight: 'bold', color: '#2980b9'}}>{item.code}:{item.clause}</span>
-                  <br/>
-                  <span style={{fontSize: '12px'}}>{item.topic}</span>
-                </div>
-                <button onClick={() => removeClause(item.clause)} style={removeBtn}>×</button>
+        {/* SELECTED CLAUSES & CALC INTERFACE */}
+        <div style={{marginTop: '20px'}}>
+          <h4 style={{fontSize: '14px', color: '#2c3e50'}}>SITE AUDIT LIST:</h4>
+          {selectedList.map(item => (
+            <div key={item.id} style={badgeStyle}>
+              <div>
+                <b>{item.clause}</b>: {item.topic}
+                {item.type.startsWith('calc') && (
+                  <button onClick={() => runQuickCalc(item.type)} style={calcBtn}>Calculate Result</button>
+                )}
               </div>
-            ))}
-          </div>
+              <button onClick={() => setSelectedList(selectedList.filter(s => s.id !== item.id))} style={{border:'none', background:'none', color:'red'}}>×</button>
+            </div>
+          ))}
         </div>
 
-        {/* Actions */}
-        <div style={actionArea}>
-          <button 
-            onClick={generateReport} 
-            disabled={loading} 
-            style={{...btnPrimary, backgroundColor: loading ? '#95a5a6' : '#2980b9'}}
-          >
-            {loading ? "GENERATING..." : "GENERATE COMPLIANCE PDF"}
-          </button>
-          
-          <button 
-            onClick={() => {setSelectedList([]); setProject(''); localStorage.clear();}} 
-            style={btnClear}
-          >
-            RESET ALL
-          </button>
+        {/* INTERACTIVE CALCULATOR PANEL */}
+        <div style={calcPanel}>
+           <h5 style={{margin: '0 0 10px 0'}}>QUICK CALCULATOR INPUTS</h5>
+           <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px'}}>
+              <input type="number" placeholder="Width (b)" style={smallInput} onChange={e => setCalcInputs({...calcInputs, b: +e.target.value})} />
+              <input type="number" placeholder="Eff. Depth (d)" style={smallInput} onChange={e => setCalcInputs({...calcInputs, d: +e.target.value})} />
+              <input type="number" placeholder="fy (N/mm2)" style={smallInput} onChange={e => setCalcInputs({...calcInputs, fy: +e.target.value})} />
+              <input type="number" placeholder="Total Depth (D)" style={smallInput} onChange={e => setCalcInputs({...calcInputs, D: +e.target.value})} />
+           </div>
+           {calcResult && <div style={resultBox}>✅ {calcResult}</div>}
         </div>
+
+        <button onClick={generateReport} disabled={loading} style={mainBtn}>
+          {loading ? "GENERATING..." : "DOWNLOAD AUDIT REPORT (PDF)"}
+        </button>
+        
+        <button onClick={() => {setSelectedList([]); localStorage.clear(); setCalcResult(null);}} style={resetBtn}>RESET DATA</button>
       </div>
     </div>
   );
 }
 
-// STYLING OBJECTS
-const containerStyle: React.CSSProperties = { maxWidth: '450px', margin: '0 auto', minHeight: '100vh', backgroundColor: '#f4f7f6', fontFamily: '"Segoe UI", Roboto, Helvetica, Arial, sans-serif' };
-const headerStyle: React.CSSProperties = { backgroundColor: '#212f3d', color: '#fff', padding: '25px', textAlign: 'center', fontWeight: 'bold', fontSize: '22px', letterSpacing: '1px' };
-const formCard: React.CSSProperties = { padding: '20px', display: 'flex', flexDirection: 'column', gap: '18px' };
-const inputGroup: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '6px', position: 'relative' };
-const labelStyle: React.CSSProperties = { fontSize: '12px', fontWeight: 'bold', color: '#566573' };
-const inputStyle: React.CSSProperties = { padding: '14px', borderRadius: '10px', border: '1px solid #d5dbdb', fontSize: '15px', outline: 'none', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.05)' };
-const suggestionBox: React.CSSProperties = { position: 'absolute', top: '65px', width: '100%', backgroundColor: '#fff', borderRadius: '10px', boxShadow: '0 4px 15px rgba(0,0,0,0.15)', zIndex: 10, maxHeight: '200px', overflowY: 'auto' };
-const suggestionItem: React.CSSProperties = { padding: '12px', borderBottom: '1px solid #f2f3f4', cursor: 'pointer' };
-const selectedContainer: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '5px' };
-const clauseBadge: React.CSSProperties = { display: 'flex', alignItems: 'center', backgroundColor: '#fff', padding: '12px', borderRadius: '10px', borderLeft: '5px solid #2980b9', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' };
-const removeBtn: React.CSSProperties = { background: '#fdedec', color: '#e74c3c', border: 'none', borderRadius: '50%', width: '25px', height: '25px', cursor: 'pointer', fontWeight: 'bold' };
-const actionArea: React.CSSProperties = { marginTop: '15px', display: 'flex', flexDirection: 'column', gap: '12px' };
-const btnPrimary: React.CSSProperties = { padding: '16px', color: 'white', border: 'none', borderRadius: '12px', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', transition: '0.3s' };
-const btnClear: React.CSSProperties = { background: 'none', border: 'none', color: '#95a5a6', textDecoration: 'underline', cursor: 'pointer', fontSize: '13px' };
+// --- STYLING (Lag-Free Mobile First) ---
+const containerStyle: React.CSSProperties = { maxWidth: '480px', margin: '0 auto', backgroundColor: '#f9f9f9', minHeight: '100vh', fontFamily: 'sans-serif' };
+const headerStyle: React.CSSProperties = { backgroundColor: '#2c3e50', color: 'white', padding: '20px', textAlign: 'center', fontWeight: 'bold', fontSize: '20px' };
+const cardStyle: React.CSSProperties = { padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' };
+const labelStyle: React.CSSProperties = { fontSize: '12px', fontWeight: 'bold', color: '#7f8c8d' };
+const inputStyle: React.CSSProperties = { padding: '12px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '15px' };
+const dropdownStyle: React.CSSProperties = { position: 'absolute', width: '100%', backgroundColor: 'white', border: '1px solid #ddd', zIndex: 100, maxHeight: '200px', overflowY: 'auto', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' };
+const itemStyle: React.CSSProperties = { padding: '12px', borderBottom: '1px solid #eee', cursor: 'pointer', fontSize: '13px' };
+const badgeStyle: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', backgroundColor: 'white', padding: '12px', borderRadius: '8px', marginBottom: '8px', borderLeft: '4px solid #3498db', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' };
+const calcBtn: React.CSSProperties = { marginLeft: '10px', padding: '4px 8px', fontSize: '11px', backgroundColor: '#27ae60', color: 'white', border: 'none', borderRadius: '4px' };
+const calcPanel: React.CSSProperties = { backgroundColor: '#ecf0f1', padding: '15px', borderRadius: '10px', marginTop: '10px' };
+const smallInput: React.CSSProperties = { padding: '8px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '12px' };
+const resultBox: React.CSSProperties = { marginTop: '10px', padding: '10px', backgroundColor: '#d4edda', color: '#155724', borderRadius: '6px', fontWeight: 'bold', fontSize: '13px' };
+const mainBtn: React.CSSProperties = { marginTop: '15px', padding: '16px', backgroundColor: '#2980b9', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', fontSize: '15px', cursor: 'pointer' };
+const resetBtn: React.CSSProperties = { background: 'none', border: 'none', color: '#95a5a6', textDecoration: 'underline', marginTop: '10px', fontSize: '13px' };
