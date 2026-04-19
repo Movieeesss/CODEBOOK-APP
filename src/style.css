@@ -1,5 +1,66 @@
-@layer border {
-  table, th, td {
-    border: 1px solid #cbd5e1; /* This makes the lines look like normal Excel lines */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom Professional Styles for CodeBook */
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer components {
+  /* Excel-like Table Styling */
+  .excel-table {
+    @apply w-full border-collapse bg-white text-sm shadow-sm rounded-lg overflow-hidden;
+  }
+
+  .excel-table th {
+    @apply bg-slate-100 border border-slate-300 p-3 font-bold text-slate-700 text-left;
+  }
+
+  .excel-table td {
+    @apply border border-slate-200 p-3 text-slate-600 transition-colors duration-200;
+  }
+
+  .excel-table tr:hover td {
+    @apply bg-blue-50/50;
+  }
+
+  /* Custom Scrollbar for Clause Suggestions */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-slate-100;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-400 rounded-full;
+  }
+
+  /* Glassmorphism Effect for the Header */
+  .glass-header {
+    @apply sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200;
+  }
+
+  /* Interactive Buttons */
+  .btn-primary {
+    @apply bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-xl 
+           active:scale-95 transition-all duration-200 shadow-lg shadow-blue-200;
+  }
+
+  /* Input Glow Effect */
+  .input-focus {
+    @apply focus:ring-4 focus:ring-blue-100 focus:border-blue-500 transition-all outline-none;
+  }
+}
+
+/* Print Optimization */
+@media print {
+  .no-print {
+    display: none;
   }
 }
